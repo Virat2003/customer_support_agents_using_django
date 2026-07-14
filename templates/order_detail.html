@@ -210,35 +210,34 @@
             flex: 1;
             overflow-y: auto;
             background: #f8f9fa;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 16px;
         }
 
         .agent-message {
+            align-self: flex-start;
+            display: inline-block;
+            width: fit-content;
+            max-width: 85%;
             background: #e9ecef;
             color: #000;
-            max-width: 80%;
-            width: fit-content;
             padding: 10px 14px;
             border-radius: 18px 18px 18px 4px;
-            margin-bottom: 10px;
-        }
-
-        .user-message {
-            background: #1a1a2e;
-            color: white;
-            border-radius: 12px;
-            width: fit-content;
-            margin-left: auto;
+            word-wrap: break-word;
         }
 
         .customer-message {
+            align-self: flex-end;
+            display: inline-block;
+            width: fit-content;
+            max-width: 85%;
             background: #1a1a2e;
             color: #fff;
-            margin-left: auto;
-            max-width: 80%;
-            width: fit-content;
             padding: 10px 14px;
             border-radius: 18px 18px 4px 18px;
-            margin-bottom: 10px;
+            word-wrap: break-word;
         }
     </style>
 </head>
@@ -343,9 +342,37 @@
                     </div>
 
                     <div id="chat-messages" class="chat-messages p-3">
+
+                        {% if conversation %}
+
+                        {% for msg in previous_messages %}
+
+                        {% if msg.role == "user" %}
+                        <div class="customer-message" style="max-width:85%; font-size:13px;">
+                            {{ msg.content }}
+                        </div>
+                        {% else %}
+                        <div class="agent-message" style="max-width:85%; font-size:13px;">
+                            {{ msg.content }}
+                        </div>
+                        {% endif %}
+
+                        {% empty %}
+
                         <div class="agent-message p-2 px-3 mb-2">
                             Hi {{ request.user.first_name }}, I'm Maya. How can I help you with your order today?
                         </div>
+
+                        {% endfor %}
+
+                        {% else %}
+
+                        <div class="agent-message p-2 px-3 mb-2">
+                            Hi {{ request.user.first_name }}, I'm Maya. How can I help you with your order today?
+                        </div>
+
+                        {% endif %}
+
                     </div>
 
                     <div class="card-footer">
@@ -386,20 +413,38 @@
             div.classList.add(type === "customer" ? "customer-message" : "agent-message")
             div.classList.add("p-2", "px-3");
             div.innerText = text;
-            if(type === "customer"){
+            if (type === "customer") {
                 div.style.color = "white";
-            }else{
+            } else {
                 div.style.color = "black";
             }
-            
+
 
             messages.appendChild(div);
             messages.scrollTop = messages.scrollHeight;
         }
 
-        function sendMessages() {
+        function showTyping() {
+            const message = document.getElementById("chat-messages")
+            message.insertAdjacentHTML("beforeend", `
+            <div id = "typing-indicator" class="agent-message" style="font-size:9px;">Typing...</div>
+            `)
+            message.scrollTop = message.scrollHeight
+        }
+
+        function hideTyping() {
+            const typing = document.getElementById("typing-indicator");
+
+            if (typing) {
+                typing.remove();
+            }
+        }
+
+        async function sendMessages() {
             const input = document.getElementById("chat-input")
             const messages = input.value.trim();
+            // console.log("message=>",messages);
+
 
             if (!messages) {
                 return;
@@ -407,11 +452,40 @@
 
             appendMessage(messages, "customer")
             input.value = "";
+            input.disabled = true
+            // setTimeout(() => showTyping(),2000);
+            showTyping();
+
+            try {
+                const response = await fetch("/support/chat/{{order.id}}/", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": "{{ csrf_token }}"
+                    },
+                    body: JSON.stringify({ message: messages })
+                });
+
+                const data = await response.json()
+                hideTyping()
+                appendMessage(data.reply, "agent")
+                input.disabled = false
+                input.focus()
+                // console.log(data.reply);
+
+            } catch (err) {
+                hideTyping();
+                console.log("error", err);
+                appendMessage("Sorry , Something went wrong", "agent")
+
+            } finally {
+
+            }
 
         }
 
-        document.getElementById("chat-input").addEventListener("keydown", (e)=>{
-            if(e.key === "Enter"){
+        document.getElementById("chat-input").addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
                 sendMessages()
             }
         })

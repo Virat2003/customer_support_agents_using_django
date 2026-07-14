@@ -4,9 +4,12 @@ from langchain.tools import tool
 from .tracking_data import DELIVERY_DATA
 
 
-# @tool
-def get_order_details(order_id):
-    # """Get the status of an order."""
+@tool
+def get_order_details(order_id:int) -> dict:
+    
+    """Fetch complete order details including status, carrier, tracking number and days since order was placed. 
+    Use this when customer mentions their order or complains about delivery."""
+
     try:
         order = Order.objects.get(id= order_id)
         return {
@@ -22,11 +25,14 @@ def get_order_details(order_id):
         }
     except Order.DoesNotExist:
         return {"error":f"order #{order_id} Not Found."}
+    
 
+@tool
+def get_refund_history(user_id:int) -> dict :
 
-# @tool
-def get_refund_history(user_id):
-    # """Get the refund history of an order."""
+    """Get complete refund history for a user. 
+    Use this before making any refund related decisions."""
+
     refunds = RefundRequest.objects.filter(user_id=user_id).order_by("-created_at")
     
     history = []
@@ -44,8 +50,12 @@ def get_refund_history(user_id):
         "history":history
     }
 
+@tool
+def check_delivery_status(tracking_number:str, carrier:str) -> dict:
 
-def check_delivery_status(tracking_number, carrier):
+    """ Check current delivery status using tracking number and carrier. 
+    Use this when customer complains about delayed or missing delivery."""
+
     default_response = {
         "status": "Unknown",
         "last_location": "Tracking info unavailable",
@@ -59,5 +69,6 @@ def check_delivery_status(tracking_number, carrier):
     result["carrier"] = carrier
 
     return result
+
 
 
