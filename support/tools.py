@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from orders.models import Order, RefundRequest
 from django.utils import timezone
 from langchain.tools import tool
@@ -70,5 +72,40 @@ def check_delivery_status(tracking_number:str, carrier:str) -> dict:
 
     return result
 
+@tool
+def get_customer_risk_profile(user_id:int) -> dict:
+    """
+    Get complete risk profile for a customer including order history, refund patterns and ratio. 
+    Use this to assess fraud risk.
+    """
+    refunds = RefundRequest.objects.filter(user_id=user_id)
+    order = Order.objects.filter(user_id=user_id)
 
+    # recent 90 refund request
+    recent_refunds = refunds.filter(created_at__gte= timezone.now()- timedelta(days=90)).count()
 
+    denied = refunds.filter(status="denied").count()
+    approved = refunds.filter(status="approved").count()
+    pending = refunds.filter(status="pending").count()
+
+    total_refunds = refunds.count()
+    total_orders = order.count()
+
+    if total_orders > 0:
+        refund_to_oder_ratio = round(total_refunds / total_orders, 2)
+    else:
+        refund_to_oder_ratio = 0
+    
+    return {
+        "user_id":user_id,
+        "total_orders":total_orders,
+        "total_refunds":total_refunds,
+        "refunds_last_90_days":recent_refunds,
+        "denied_refunds":denied,
+        "approved_refunds":approved,
+        "pending_refunds":pending,
+        "refund_to_oder_ratio":refund_to_oder_ratio
+    }
+
+    
+    
