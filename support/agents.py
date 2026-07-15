@@ -8,8 +8,23 @@ from .models import Conversation, Messages
 from langchain.tools import tool
 from langchain_groq import ChatGroq
 from .tools import get_customer_risk_profile
+from .models import AgentLog
+from .models import Conversation
+from langchain_core.messages import AIMessage
+from langchain_core.messages import ToolMessage
 
 
+CURRENT_CONVERSATION_ID = None
+
+def log_event(conversation_id,event_type,message):
+    
+    conversation = Conversation.objects.get(id= conversation_id)
+
+    AgentLog.objects.create(
+        conversation=conversation,
+        event_type=event_type,
+        message = str(message)
+    )
 
 llm = ChatMistralAI(model=settings.MISTRAL_MODEL, api_key=settings.MISTRAL_API_KEY)
 
@@ -83,7 +98,7 @@ def escalate_to_manager(case_summary:str) -> dict:
     This tool returns the manager's final refund decision.
     Never answer a refund request without calling this tool.
     """
-    return run_manager_agent(case_summary)
+    return run_manager_agent(case_summary, CURRENT_CONVERSATION_ID)
 
 @tool
 def assess_fraud_risk(user_id: int) -> str:
@@ -93,6 +108,7 @@ def assess_fraud_risk(user_id: int) -> str:
     Pass the user_id to get a risk verdict.
 
     """
+    log_event(CURRENT_CONVERSATION_ID, "manager", f"Consulting Risk Agent for fraud assessment of user {user_id}.")
     return run_risk_agent(user_id)
 
 
@@ -107,8 +123,11 @@ support_agent = create_agent(
 # def support_agent():
 
 def run_support_agent(user_message, conversation_id, order_id, user_id):
+
+    global CURRENT_CONVERSATION_ID
+    CURRENT_CONVERSATION_ID = conversation_id
     
-    # conv = Conversation.objects.get(id=conversation_id)
+    conv = Conversation.objects.get(id=conversation_id)
 
     # conversation_messages = []
     
@@ -124,18 +143,42 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
 
     contextual_message = f"[Context: This conversation is about Order #{order_id}, user:{user_id}] {user_message}"
 
+    log_event(conversation_id, event_type="support",message=f"Customer: {user_message}")
+
     result = support_agent.invoke(
         {"messages": [{"role": "user", "content": contextual_message}]},
         config=config,
     )
 
+    # Log Tool Calls
+    for msg in result["messages"]:
+        if isinstance(msg, AIMessage):
+            for tool in msg.tool_calls:
+                log_event(
+                conversation_id,
+                "tool_call",
+                f"Tool: {tool['name']}\nArguments: {tool['args']}"
+            )
+                
+    # Log Tool Results
+    for msg in result["messages"]:
+        if isinstance(msg, ToolMessage):
+            log_event(
+            conversation_id,
+            "tool_result",
+            f"Tool: {msg.name}\nResult:\n{msg.content}"
+        )
+
     # Add these lines
-    from pprint import pprint
-    pprint(result["messages"])
+    # from pprint import pprint
+    # pprint(result["messages"])
 
     print("result==>", result["messages"][-1].content)
-    pprint(result)
     final_result = result["messages"][-1].content
+
+    # log the final result
+    log_event(conversation_id, "final", final_result)
+
     return final_result
 
 
@@ -144,70 +187,153 @@ You are a Senior Support Manager at CoolBreeze AC.
 
 A customer support agent has escalated a refund request to you.
 
-Your responsibilities:
-- Review the complete case summary.
-- Review any available order information.
+Your role is to make the FINAL business decision on refund requests.
+
+--------------------------------------------------
+Responsibilities
+--------------------------------------------------
+
+- Review the complete case summary provided by the support agent.
+- Review all available order information.
 - Review the customer's refund history.
-- Review the Risk Agent's assessment if one is provided.
-- Make the final business decision.
+- If a Risk Agent assessment is provided, use it as part of your decision.
+- Make the final refund decision.
 
-Decision options:
-- Approve Refund
-- Deny Refund
-- Request Risk Assessment (only if a fraud assessment has not yet been performed)
+--------------------------------------------------
+Refund Decision Workflow (MANDATORY)
+--------------------------------------------------
 
-If a Risk Agent report is already available:
-- Never request another risk assessment.
-- Use the Risk Agent's report to make the final decision.
+1. Carefully review the case summary.
 
-The Risk Agent provides analysis only.
-You are responsible for the final refund decision.
+2. If the case contains ANY of the following:
 
-Important Rules:
+- multiple refund requests
+- previous refund denials
+- repeated refund requests for the same order
+- suspicious customer behaviour
+- possible fraud indicators
 
-- Base every decision only on the facts provided.
-- Never invent company policies.
-- Never invent warranty information.
-- Never invent refund windows.
-- Never assume facts that are not present.
+You MUST call the assess_fraud_risk(user_id) tool.
 
-When giving your decision:
+3. Never make assumptions about fraud yourself.
 
-1. Clearly state:
-   Refund Decision: Approve or Deny
+4. Wait until the Risk Agent returns its assessment.
 
-2. Explain WHY using the facts from the case summary.
+5. Use BOTH:
+   - the case summary
+   - the Risk Agent's assessment
 
-Examples of valid reasons:
-- Order age
-- Order status
-- Delivery status
-- Product condition (if known)
-- Refund history
+to make the final business decision.
+
+6. If a Risk Agent assessment has already been provided, DO NOT call the tool again.
+
+--------------------------------------------------
+Tool Usage Rules
+--------------------------------------------------
+
+The only tool available for fraud assessment is:
+
+assess_fraud_risk(user_id)
+
+Rules:
+
+- Always use this tool for suspicious refund requests.
+- Never skip this tool because you think you already have enough information.
+- Never estimate fraud risk yourself.
+- Wait for the tool result before making the final decision.
+
+--------------------------------------------------
+Decision Rules
+--------------------------------------------------
+
+Base every decision ONLY on the facts provided.
+
+Never invent:
+
+- company policies
+- refund windows
+- warranty periods
+- delivery information
+- product defects
+- customer history
+
+Never assume facts that are not present.
+
+--------------------------------------------------
+Decision Format
+--------------------------------------------------
+
+Always respond in the following format:
+
+Refund Decision: Approve
+or
+Refund Decision: Deny
+
+Reason:
+<clear explanation>
+
+--------------------------------------------------
+Valid Reasons
+--------------------------------------------------
+
+Use only facts from the case, such as:
+
+- order age
+- delivery status
+- order status
+- product condition
+- refund history
 - Risk Agent recommendation
 
 Prioritize the strongest business reason first.
 
-Write the explanation in customer-friendly language.
+--------------------------------------------------
+Customer-Friendly Language
+--------------------------------------------------
+
+Write the reason so it can be shown directly to the customer.
 
 Do NOT mention:
+
 - fraud score
 - refund ratio
 - internal investigations
-- internal decision-making
+- internal risk assessment
 - internal business rules
+- internal decision-making process
 
-Bad example:
-"The decision is final."
+Instead, explain the decision in simple, professional language.
 
-Good example:
-"Refund Decision: Deny
+Never tell the customer that they are considered "high risk",
+"suspicious", or "fraudulent".
+
+Never mention that the Risk Agent was consulted.
+
+Instead, explain the outcome using customer-visible facts such as:
+- previous refund decisions
+- order history
+- delivery status
+- product condition
+- refund eligibility
+
+The customer should never know that an internal fraud assessment took place.
+
+Example:
+
+Refund Decision: Deny
 
 Reason:
-The order was delivered more than 450 days ago.
-After reviewing your request and account history, we are unable to approve this refund request."
+This order has already been reviewed for a refund previously, and after reviewing the order history and account information, we are unable to approve another refund request for the same issue.
 
-Keep your response concise and professional.
+--------------------------------------------------
+Final Rule
+--------------------------------------------------
+
+You are responsible for the final refund decision.
+
+The Risk Agent provides analysis only.
+
+Do not delegate the final decision to any other agent.
 """
 
 
@@ -218,7 +344,11 @@ manager_agent = create_agent(
 )
 
 
-def run_manager_agent(case_summary):
+def run_manager_agent(case_summary, conversation_id):
+
+    log_event(conversation_id, "manager", "Manager started reviewing the refund request.")
+    log_event(conversation_id, event_type="manager", message=f"Case Summary:\n{case_summary[:200]}")
+
     result = manager_agent.invoke({
     "messages": [
         {
@@ -228,9 +358,13 @@ def run_manager_agent(case_summary):
     ]
 })
     
+    
     print("case_summary==>",case_summary)
 
     decision = result["messages"][-1].content
+
+    log_event(conversation_id, "manager", f"Manager Decision:\n{decision}")
+
     print("Decision==>",decision)
     return decision
 
@@ -267,12 +401,40 @@ risk_agent = create_agent(
 )
 
 def run_risk_agent(user_id):
+
+    log_event(CURRENT_CONVERSATION_ID, "risk", f"Risk assessment started for user {user_id}.")
+
     content = f"Please assess the fraud risk for user ID {user_id}. Use your tool to get their profile and return a verdict."
     response = risk_agent.invoke({
         "messages": [{"role": "user", "content": content}]
     })
 
+    for msg in response["messages"]:
+        if isinstance(msg, AIMessage):
+            for tool in msg.tool_calls:
+                log_event(
+                CURRENT_CONVERSATION_ID,
+                "tool_call",
+                f"[Risk Agent] Tool: {tool['name']}\nArguments: {tool['args']}"
+            )
+                
+    for msg in response["messages"]:
+        if isinstance(msg, ToolMessage):
+            log_event(
+            CURRENT_CONVERSATION_ID,
+            "tool_result",
+            f"[Risk Agent] Tool: {msg.name}\nResult:\n{msg.content}"
+        )
+
     decision = response["messages"][-1].content
+
+    log_event(CURRENT_CONVERSATION_ID, "risk", f"Verdict:{decision[:200]}")
     print("Decision==>",decision)
     return decision
     
+
+
+
+
+
+
