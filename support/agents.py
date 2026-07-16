@@ -12,6 +12,7 @@ from .models import AgentLog
 from .models import Conversation
 from langchain_core.messages import AIMessage
 from langchain_core.messages import ToolMessage
+from langchain.agents.middleware import wrap_tool_call
 
 
 CURRENT_CONVERSATION_ID = None
@@ -112,15 +113,8 @@ def assess_fraud_risk(user_id: int) -> str:
     return run_risk_agent(user_id)
 
 
-support_agent = create_agent(
-            model = llm,
-            tools= [get_order_details, get_refund_history, check_delivery_status, escalate_to_manager],
-            system_prompt=support_system_prompt,
-            checkpointer=InMemorySaver() # used by LangGraph/LangChain agents to remember the conversation state between messages.
-        )
 
 
-# def support_agent():
 
 def run_support_agent(user_message, conversation_id, order_id, user_id):
 
@@ -143,6 +137,36 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
 
     contextual_message = f"[Context: This conversation is about Order #{order_id}, user:{user_id}] {user_message}"
 
+    @wrap_tool_call
+    def log_tool_calls(request, handler):
+        
+        # Before execution
+        print("about to tool call")
+        tool_name = request.tool_call["name"]
+        tool_args = request.tool_call["args"]
+
+        # log tool call
+        AgentLog.objects.create(conversation = conv, event_type= "tool_call", message=f"Calling tool {tool_name} with {tool_args}")
+
+        print("tool_name==>", tool_name)
+        print("tool_args==>", tool_args) 
+        
+        result = handler(request)
+        print("result ==>", result)
+        
+        # after execution
+        print("finshed tool call")
+        AgentLog.objects.create(conversation = conv, event_type= "tool_result", message=f"{tool_name} returned: {str(result)[:200]}")
+        return result
+
+    support_agent = create_agent(
+                model = llm,
+                tools= [get_order_details, get_refund_history, check_delivery_status, escalate_to_manager],
+                system_prompt=support_system_prompt,
+                checkpointer=InMemorySaver(), # used by LangGraph/LangChain agents to remember the conversation state between messages.
+                middleware=[ log_tool_calls ]
+            )
+
     log_event(conversation_id, event_type="support",message=f"Customer: {user_message}")
 
     result = support_agent.invoke(
@@ -150,32 +174,13 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
         config=config,
     )
 
-    # Log Tool Calls
-    for msg in result["messages"]:
-        if isinstance(msg, AIMessage):
-            for tool in msg.tool_calls:
-                log_event(
-                conversation_id,
-                "tool_call",
-                f"Tool: {tool['name']}\nArguments: {tool['args']}"
-            )
-                
-    # Log Tool Results
-    for msg in result["messages"]:
-        if isinstance(msg, ToolMessage):
-            log_event(
-            conversation_id,
-            "tool_result",
-            f"Tool: {msg.name}\nResult:\n{msg.content}"
-        )
-
     # Add these lines
     # from pprint import pprint
     # pprint(result["messages"])
 
     print("result==>", result["messages"][-1].content)
     final_result = result["messages"][-1].content
-
+ 
     # log the final result
     log_event(conversation_id, "final", final_result)
 
