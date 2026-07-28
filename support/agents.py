@@ -13,6 +13,9 @@ from .models import Conversation
 from langchain_core.messages import AIMessage
 from langchain_core.messages import ToolMessage
 from langchain.agents.middleware import wrap_tool_call
+from .event_queue import publish
+from .event_queue import DONE
+from django.utils import timezone
 
 
 CURRENT_CONVERSATION_ID = None
@@ -123,6 +126,8 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
     
     conv = Conversation.objects.get(id=conversation_id)
 
+
+
     # conversation_messages = []
     
     # for msg in conv.messages.order_by("created_at"):
@@ -148,15 +153,22 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
         # log tool call
         AgentLog.objects.create(conversation = conv, event_type= "tool_call", message=f"Calling tool {tool_name} with {tool_args}")
 
-        print("tool_name==>", tool_name)
-        print("tool_args==>", tool_args) 
+        # print("tool_name==>", tool_name)
+        # print("tool_args==>", tool_args) 
         
+        # publish tool_call
+        publish(conversation_id, { "type": "tool_call", "message": f"Calling tool {tool_name} with {tool_args}", "time": timezone.localtime().strftime("%I:%M %p") })
+
         result = handler(request)
-        print("result ==>", result)
+        # print("result ==>", result)
         
         # after execution
         print("finshed tool call")
         AgentLog.objects.create(conversation = conv, event_type= "tool_result", message=f"{tool_name} returned: {str(result)[:200]}")
+        
+        # publish tool_result
+        publish(conversation_id, { "type": "tool_result", "message": f"{tool_name} returned: {str(result)[:200]}","time": timezone.localtime().strftime("%I:%M %p") })
+        
         return result
 
     support_agent = create_agent(
@@ -180,9 +192,14 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
 
     print("result==>", result["messages"][-1].content)
     final_result = result["messages"][-1].content
- 
+
+    event = {"type":"final", "message":final_result, "time": timezone.localtime().strftime("%I:%M %p")}
+    publish(conversation_id, event)
+    
     # log the final result
     log_event(conversation_id, "final", final_result)
+
+    publish(conversation_id, DONE)
 
     return final_result
 
@@ -352,8 +369,10 @@ manager_agent = create_agent(
 def run_manager_agent(case_summary, conversation_id):
 
     log_event(conversation_id, "manager", "Manager started reviewing the refund request.")
-    log_event(conversation_id, event_type="manager", message=f"Case Summary:\n{case_summary[:200]}")
-
+    publish(conversation_id, { "type": "manager", "message": "Manager started reviewing the refund request.","time": timezone.localtime().strftime("%I:%M %p")})
+    summary = f"Case Summary:\n{case_summary[:200]}"
+    log_event(conversation_id, event_type="manager", message=summary)
+    publish(conversation_id, { "type": "manager", "message": summary, "time": timezone.localtime().strftime("%I:%M %p") })
     result = manager_agent.invoke({
     "messages": [
         {
@@ -369,6 +388,7 @@ def run_manager_agent(case_summary, conversation_id):
     decision = result["messages"][-1].content
 
     log_event(conversation_id, "manager", f"Manager Decision:\n{decision}")
+    publish(conversation_id,{ "type": "manager", "message": f"Manager Decision:\n{decision}", "time": timezone.localtime().strftime("%I:%M %p")})
 
     print("Decision==>",decision)
     return decision
@@ -407,7 +427,9 @@ risk_agent = create_agent(
 
 def run_risk_agent(user_id):
 
+
     log_event(CURRENT_CONVERSATION_ID, "risk", f"Risk assessment started for user {user_id}.")
+    publish(CURRENT_CONVERSATION_ID, { "type": "risk", "message": f"Risk assessment started for user {user_id}.","time": timezone.localtime().strftime("%I:%M %p")})
 
     content = f"Please assess the fraud risk for user ID {user_id}. Use your tool to get their profile and return a verdict."
     response = risk_agent.invoke({
@@ -422,6 +444,9 @@ def run_risk_agent(user_id):
                 "tool_call",
                 f"[Risk Agent] Tool: {tool['name']}\nArguments: {tool['args']}"
             )
+                publish(CURRENT_CONVERSATION_ID, { "type": "tool_call", "message": f"[Risk Agent] Tool: {tool['name']}\nArguments: {tool['args']}","time": timezone.localtime().strftime("%I:%M %p") })
+
+            
                 
     for msg in response["messages"]:
         if isinstance(msg, ToolMessage):
@@ -430,10 +455,13 @@ def run_risk_agent(user_id):
             "tool_result",
             f"[Risk Agent] Tool: {msg.name}\nResult:\n{msg.content}"
         )
+            publish(CURRENT_CONVERSATION_ID, { "type": "tool_result", "message": f"[Risk Agent] Tool: {msg.name}\nResult:\n{msg.content}","time": timezone.localtime().strftime("%I:%M %p") })
+
 
     decision = response["messages"][-1].content
 
     log_event(CURRENT_CONVERSATION_ID, "risk", f"Verdict:{decision[:200]}")
+    publish(CURRENT_CONVERSATION_ID, { "type": "risk", "message": f"Verdict:\n{decision}","time": timezone.localtime().strftime("%I:%M %p") })
     print("Decision==>",decision)
     return decision
     
