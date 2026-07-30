@@ -4,6 +4,7 @@ from orders.models import Order, RefundRequest
 from django.utils import timezone
 from langchain.tools import tool
 from .tracking_data import DELIVERY_DATA
+from .rag import search_knowledge_base as rag_search
 
 
 @tool
@@ -108,4 +109,15 @@ def get_customer_risk_profile(user_id:int) -> dict:
     }
 
     
+@tool
+def search_knowledge_base(query:str) -> dict:
+    """
+    Search CoolBreeze AC company documents including refund policy, warranty policy, and product FAQs. 
+    Use this when customer asks about company policies, warranty coverage, warranty claims, refund eligibility, or any general product information that requires accurate company documentation.
+    """
+    result = rag_search(query)
+    return  {
+        "result": result
+    }
     
+

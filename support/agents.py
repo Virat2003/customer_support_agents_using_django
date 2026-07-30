@@ -16,6 +16,7 @@ from langchain.agents.middleware import wrap_tool_call
 from .event_queue import publish
 from .event_queue import DONE
 from django.utils import timezone
+from .tools import search_knowledge_base
 
 
 CURRENT_CONVERSATION_ID = None
@@ -173,7 +174,7 @@ def run_support_agent(user_message, conversation_id, order_id, user_id):
 
     support_agent = create_agent(
                 model = llm,
-                tools= [get_order_details, get_refund_history, check_delivery_status, escalate_to_manager],
+                tools= [get_order_details, get_refund_history, check_delivery_status, escalate_to_manager, search_knowledge_base],
                 system_prompt=support_system_prompt,
                 checkpointer=InMemorySaver(), # used by LangGraph/LangChain agents to remember the conversation state between messages.
                 middleware=[ log_tool_calls ]
@@ -359,10 +360,49 @@ Do not delegate the final decision to any other agent.
 """
 
 
+@wrap_tool_call
+def manager_tool_logger(request, handler):
+
+    tool_name = request.tool_call["name"]
+    tool_args = request.tool_call["args"]
+
+    # Before tool execution
+    log_event(
+        CURRENT_CONVERSATION_ID,
+        "tool_call",
+        f"[Manager Agent] Calling tool {tool_name} with {tool_args}"
+    )
+
+    publish(CURRENT_CONVERSATION_ID, {
+        "type": "tool_call",
+        "message": f"[Manager Agent] Calling tool {tool_name} with {tool_args}",
+        "time": timezone.localtime().strftime("%I:%M %p")
+    })
+
+    result = handler(request)
+
+    # After tool execution
+    log_event(
+        CURRENT_CONVERSATION_ID,
+        "tool_result",
+        f"[Manager Agent] {tool_name} returned: {str(result)[:200]}"
+    )
+
+    publish(CURRENT_CONVERSATION_ID, {
+        "type": "tool_result",
+        "message": f"[Manager Agent] {tool_name} returned: {str(result)[:200]}",
+        "time": timezone.localtime().strftime("%I:%M %p")
+    })
+
+    return result
+
+
+
 manager_agent = create_agent(
     model=llm,
     system_prompt=manager_system_prompt,
-    tools=[ assess_fraud_risk ]
+    tools=[ assess_fraud_risk ],
+    middleware=[manager_tool_logger]
 )
 
 
@@ -419,14 +459,53 @@ Important:
 - Look for patterns — not isolated incidents
 """
 
+
+
+@wrap_tool_call
+def risk_tool_logger(request, handler):
+
+    tool_name = request.tool_call["name"]
+    tool_args = request.tool_call["args"]
+
+    # Before tool execution
+    log_event(
+        CURRENT_CONVERSATION_ID,
+        "tool_call",
+        f"[Risk Agent] Calling tool {tool_name} with {tool_args}"
+    )
+
+    publish(CURRENT_CONVERSATION_ID, {
+        "type": "tool_call",
+        "message": f"[Risk Agent] Calling tool {tool_name} with {tool_args}",
+        "time": timezone.localtime().strftime("%I:%M %p")
+    })
+
+    result = handler(request)
+
+    # After tool execution
+    log_event(
+        CURRENT_CONVERSATION_ID,
+        "tool_result",
+        f"[Risk Agent] {tool_name} returned: {str(result)[:200]}"
+    )
+
+    publish(CURRENT_CONVERSATION_ID, {
+        "type": "tool_result",
+        "message": f"[Risk Agent] {tool_name} returned: {str(result)[:200]}",
+        "time": timezone.localtime().strftime("%I:%M %p")
+    })
+
+    return result
+
+
 risk_agent = create_agent(
     model=llm,
     tools=[ get_customer_risk_profile ],
-    system_prompt=risk_agent_system_prompt
+    system_prompt=risk_agent_system_prompt,
+    middleware=[risk_tool_logger]
 )
 
 def run_risk_agent(user_id):
-
 
     log_event(CURRENT_CONVERSATION_ID, "risk", f"Risk assessment started for user {user_id}.")
     publish(CURRENT_CONVERSATION_ID, { "type": "risk", "message": f"Risk assessment started for user {user_id}.","time": timezone.localtime().strftime("%I:%M %p")})
