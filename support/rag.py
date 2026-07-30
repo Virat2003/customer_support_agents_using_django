@@ -46,14 +46,22 @@ def chunk_text(text, chunk_size=500):
 
 
 def load_documents():
+
+    if collection.count() > 0:
+        print(f"Knowledge base already exists ({collection.count()} chunks).")
+        return
+
     docs_path = "support/documents"
+
+    if not os.path.exists(docs_path):
+        raise FileNotFoundError(f"{docs_path} not found")
 
     documents = []
     ids = []
 
     for filename in os.listdir(docs_path):
         if filename.endswith(".pdf"):
-            #  filepath : support/documents/refund_policy.pdf
+
             file_path = os.path.join(docs_path, filename)
             reader = PdfReader(file_path)
 
@@ -70,7 +78,7 @@ def load_documents():
     if documents:
         collection.add(documents=documents, ids=ids)
 
-    print(f"loaded {len(documents)} chunks into chromadb.")
+    print(f"Loaded {len(documents)} chunks into ChromaDB.")
 
 
 
@@ -85,6 +93,15 @@ def search_knowledge_base(query):
 
 
 
+try:
+    count = collection.count()
 
+    if count == 0:
+        print("Initializing knowledge base...")
+        load_documents()
+    else:
+        print(f"Knowledge base ready ({count} chunks).")
 
+except Exception as e:
+    print(f"Error initializing knowledge base: {e}")
 
