@@ -6,7 +6,7 @@ from langchain.agents import create_agent
 from langgraph.checkpoint.memory import InMemorySaver
 from .models import Conversation, Messages
 from langchain.tools import tool
-from langchain_groq import ChatGroq
+# from langchain_groq import ChatGroq
 from .tools import get_customer_risk_profile
 from .models import AgentLog
 from .models import Conversation
@@ -33,10 +33,10 @@ def log_event(conversation_id,event_type,message):
 
 llm = ChatMistralAI(model=settings.MISTRAL_MODEL, api_key=settings.MISTRAL_API_KEY)
 
-llm2 = ChatGroq(
-    model= settings.GROQ_MODEL,
-    api_key=settings.GROQ_API_KEY
-)
+# llm2 = ChatGroq(
+#     model= settings.GROQ_MODEL,
+#     api_key=settings.GROQ_API_KEY
+# )
 
 support_system_prompt = """
                 You are Maya, a customer support agent at CoolBreeze AC.

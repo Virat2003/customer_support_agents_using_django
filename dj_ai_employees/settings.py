@@ -139,8 +139,8 @@ LOGIN_URL = "/login/"
 
 MISTRAL_API_KEY=config("MISTRAL_API_KEY")
 MISTRAL_MODEL=config("MISTRAL_MODEL")
-GROQ_API_KEY=config("GROQ_API_KEY")
-GROQ_MODEL=config("GROQ_MODEL")
+# GROQ_API_KEY=config("GROQ_API_KEY")
+# GROQ_MODEL=config("GROQ_MODEL")
 
 STATICFILES_STORAGE = (
     "whitenoise.storage.CompressedManifestStaticFilesStorage"
