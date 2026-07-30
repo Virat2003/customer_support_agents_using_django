@@ -6,22 +6,43 @@ from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunct
 
 
 #  initialize chromadb client
-client = chromadb.PersistentClient(path="./chroma_db")
+# client = chromadb.PersistentClient(path="./chroma_db")
 
 
 # default embedding model that converts text into numbers
 # embedding_fn = DefaultEmbeddingFunction()  
 
 
-embedding_function = SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"
-)
+# embedding_function = SentenceTransformerEmbeddingFunction(
+#     model_name="all-MiniLM-L6-v2"
+# )
 
 #  get or create collection - just like table in regular database
-collection = client.get_or_create_collection(
-    name="coolbreeze_docs",
-    embedding_function= embedding_function
-)
+# collection = client.get_or_create_collection(
+#     name="coolbreeze_docs",
+#     embedding_function= embedding_function
+# )
+
+client = None
+collection = None
+
+
+def get_collection():
+    global client, collection
+
+    if collection is None:
+        client = chromadb.PersistentClient(path="./chroma_db")
+
+        embedding_function = SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+
+        collection = client.get_or_create_collection(
+            name="coolbreeze_docs",
+            embedding_function=embedding_function,
+        )
+
+    return collection
 
 
 def chunk_text(text, chunk_size=500):
@@ -46,6 +67,7 @@ def chunk_text(text, chunk_size=500):
 
 
 def load_documents():
+    collection = get_collection()
 
     if collection.count() > 0:
         print(f"Knowledge base already exists ({collection.count()} chunks).")
@@ -83,6 +105,8 @@ def load_documents():
 
 
 def search_knowledge_base(query):
+    collection = get_collection()
+
     results = collection.query(query_texts=[query], n_results=3)
 
     if not results["documents"][0]:
@@ -90,18 +114,3 @@ def search_knowledge_base(query):
 
     matched_chunks = results["documents"][0]
     return "\n\n".join(matched_chunks)
-
-
-
-try:
-    count = collection.count()
-
-    if count == 0:
-        print("Initializing knowledge base...")
-        load_documents()
-    else:
-        print(f"Knowledge base ready ({count} chunks).")
-
-except Exception as e:
-    print(f"Error initializing knowledge base: {e}")
-
