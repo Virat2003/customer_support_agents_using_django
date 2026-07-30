@@ -30,7 +30,19 @@ def chat(request, order_id):
 
         publish(conversation.id, event)
 
-        reply = run_support_agent(user_message, conversation.id, order.id ,request.user.id)
+        # reply = run_support_agent(user_message, conversation.id, order.id ,request.user.id)
+        try:
+            reply = run_support_agent(
+        user_message,
+        conversation.id,
+        order.id,
+        request.user.id,
+    )
+        except Exception as e:
+            import traceback
+
+            print(traceback.format_exc())
+            return JsonResponse({"error": str(e)}, status=500)
 
         Messages.objects.create(conversation=conversation, role="agent", content=reply)
 
