@@ -4,7 +4,7 @@ from django.http import JsonResponse
 import time
 from .models import Messages, Conversation
 from orders.models import Order
-from .agents import run_support_agent
+# from .agents import run_support_agent
 from django.contrib.admin.views.decorators import staff_member_required
 from .event_queue import publish, subscribe, unsubscribe
 
@@ -12,6 +12,9 @@ from django.http import StreamingHttpResponse
 
 # Create your views here.
 def chat(request, order_id):
+
+    from .agents import run_support_agent
+
     if request.method == "POST":
         data = json.loads(request.body)
         user_message = data.get("message")
